@@ -1,0 +1,173 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.constants import mu_0, c, e, m_e, pi
+from scipy.integrate import solve_ivp
+from scipy.optimize import root_scalar
+# working constants
+# Kurzgesagt actual electron speed 0.999999999999999999999995, which leads to a zero division error
+v = 0.9999999999999995 * c  # Electron velocity, nearly the speed of light
+L = 1e3  # Conductor length in meters (1 km)
+d = 3e9  # Distance to impact in meters from the conductor(300,000 km)
+r_e = 6.371e6  # Earth's radius in meters
+q = e  # Charge of electron
+m_0 = m_e  # Rest mass of electron
+A = 100 #crossectional area of the conductor
+p = 1.68e-8 #resistivitys 
+res = p*L/A #resistance
+# Initial conditions
+r0 = r_e*0.5  # Assuming Half the radius of Earth for maximum required current-->run program required current fig 2
+v_r0 = 0  # Initial radial velocity (assuming it starts from rest, as beam is parrallel to conductor)
+
+# Time span to solve the ODE
+# Assuming the magnetic fields acts over the length of the conductor in the time it takes for an electron to pass
+t_time = L/v
+t_span = (0, t_time)  
+t_eval = np.linspace(t_span[0], t_span[1], 1000)  # Evaluates solution at 1000 points within the time span
+
+# Target deflection angle in rad and degrees
+# No safety distance calculated in yet
+# r0 working variable represents the graphically deduced maximum required current for an initial position
+target_angle_rad = np.arctan((r_e-r0)/d)
+target_angle_deg = np.degrees(target_angle_rad)
+print("target angle in degrees:", target_angle_deg)
+
+# Solving the ODE for plotting, and angles
+def deflection_angle_difference(I, target_angle_deg):
+    """Calculates the difference between the required angle and the angle achieved by increasing the current I.
+    """
+    # Redefines the Lorentz force function to use the variable current I, lorentz force acting perpindicular to the initial direction of the electron through the straight conductor
+    def lorentz_force_with_I(t, y):
+        r, v_r = y
+        gamma = 1 / np.sqrt(1 - (v / c)**2)
+        drdt = v_r
+        dv_rdt = (q * v * mu_0 * I) / (2 * pi * m_0 * r * gamma)
+        return [drdt, dv_rdt]
+     # Solve the ODE with the given current I
+    sol = solve_ivp(lorentz_force_with_I, t_span, [r0, v_r0], t_eval=t_eval, method='RK45')
+    
+    # Calculates the deflection angle
+    end_rad = (np.interp(t_time, sol.t, sol.y[0]) - r0)
+    angle_rad = np.arctan(end_rad / L)
+    angle_deg = np.degrees(angle_rad)
+    
+    # Return the difference between the calculated angle and the target angle
+    return angle_deg - target_angle_deg
+def calculate_deflection_angle(I):
+    """
+    Calculate the deflection angle for a given current I using the Lorentz force equation.
+    """
+    def lorentz_force_with_I(t, y):
+        r, v_r = y
+        gamma = 1 / np.sqrt(1 - (v / c)**2)
+        drdt = v_r
+        dv_rdt = (q * v * mu_0 * I) / (2 * pi * m_0 * r * gamma)
+        return [drdt, dv_rdt]
+    
+    # Solve the ODE with the given current I
+    sol = solve_ivp(lorentz_force_with_I, t_span, [r0, v_r0], t_eval=t_eval, method='RK45')
+    
+    # Calculate the deflection angle
+    end_rad = (np.interp(t_time, sol.t, sol.y[0]) - r0)
+    angle_rad = np.arctan(end_rad / L)
+    angle_deg = np.degrees(angle_rad)
+    
+    return angle_deg
+
+# Example currents
+# Fixing all other variables, 
+I_1 = 1e12  # Initial guess for the current
+I_2 = I_1 * 1.1  # A slightly different guess to start the secant method
+
+#for small required angle deflections e.g. 0.06 the angle given the current increases linearly-->run code see graph 1
+#slope estimation
+I1 = 1 
+I2 = 2e6
+# Calculates deflection angles for the given currents
+theta1 = calculate_deflection_angle(I_1)
+theta2 = calculate_deflection_angle(I_2)
+# Calculates the slope m of the linear relationship
+m = (theta2 - theta1) / (I_2 - I_1)
+# with the slope we can calculate the required current given the previously calculated target angle
+# the required current is the max required current, for other r_0 see graph 2, a greater reflection wouldn't be problematic
+# perhaps when we only want to diffuse the electron beam, using other values for r_0 might be resonable
+required_I = target_angle_deg/m
+print("required current", required_I)
+
+terra_watts_required = (res*t_time*required_I**2)/1000000000000
+print("terrawatts required:", terra_watts_required)
+# Range of I values to explore
+I_values = np.linspace(0, 4e12, 100)
+angle_differences = [deflection_angle_difference(I, target_angle_deg) for I in I_values]
+
+# Plotting
+plt.figure(figsize=(10, 6))
+plt.plot(I_values, angle_differences, label='Angle Difference')
+plt.axhline(0, color='r', linestyle='--', label='Target Angle')
+plt.xlabel('Current I (Amperes)')
+plt.ylabel('Deflection Angle Difference (Degrees)')
+plt.title('Deflection Angle Difference vs. Current I')
+plt.legend()
+plt.grid(True)
+plt.show()
+
+#relationship of intial r_0 to required deflection current
+r0_values = np.linspace(1, r_e - 1, 100)
+required_currents_r0 = []
+for r0 in r0_values:
+    # Calculate the target deflection angle in degrees for each initial r0
+    target_angle_rad = np.arctan((r_e - r0) / d)
+    target_angle_deg = np.degrees(target_angle_rad)
+    
+    theta1 = calculate_deflection_angle(I_1)
+    theta2 = calculate_deflection_angle(I_2)
+    # Calculate the slope m of the linear relationship
+    m = (theta2 - theta1) / (I_2 - I_1)
+
+    # Calculate the required current using the linear relationship (assuming m is known)
+    required_I = target_angle_deg / m  # Ensure m is calculated or defined earlier based on your setup
+    
+    # Append the required current to the array
+    required_currents_r0.append(required_I)
+#-->maximum required is at half the distance between the edge
+plt.figure(figsize=(10, 6))
+plt.plot(r0_values, required_currents_r0, label='Required Current vs. r0')
+plt.xlabel('Initial Distance r0 (meters)')
+plt.ylabel('Required Current (Amperes)')
+plt.title('Required Current to Achieve Target Angle vs. Initial Distance r0')
+plt.legend()
+plt.grid(True)
+plt.show()
+
+#relationship between conductor distance from earth 
+d_values = np.linspace(3e7, 3e9, 100)
+required_currents_d = []
+for d in d_values:
+    # Calculate the target deflection angle in degrees for each r0
+    target_angle_rad = np.arctan((r_e - r0) / d)
+    target_angle_deg = np.degrees(target_angle_rad)
+    theta1 = calculate_deflection_angle(I_1)
+    theta2 = calculate_deflection_angle(I_2)
+    # Calculate the slope m of the linear relationship
+    m = (theta2 - theta1) / (I_2 - I_1)
+
+    # Calculate the required current using the linear relationship (assuming m is known)
+    required_I = target_angle_deg / m  # Ensure m is calculated or defined earlier based on your setup
+    
+    # Append the required current to the array
+    required_currents_d.append(required_I)
+# Plotting
+plt.figure(figsize=(10, 6))
+plt.plot(r0_values, required_currents_d, label='Required Current vs. earth distance')
+plt.xlabel('Initial Distance d (meters)')
+plt.ylabel('Required Current (Amperes)')
+plt.title('Required Current to Achieve Target Angle vs. d')
+plt.legend()
+plt.grid(True)
+plt.show()
+
+# work-in-progress length of conductor
+l_values = np.linspace(3e7, 3e9, 100)
+required_currents_l = []
+for l in l_values
+    calculate_deflection_angle()
+
